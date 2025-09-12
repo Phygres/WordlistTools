@@ -10,7 +10,7 @@ It can clean, merge, normalize, and format wordlists with flexible options.
 You can install **wltools** system-wide with:
 
 ```bash
-curl -s https://raw.githubusercontent.com/phygres/wltools/main/install.sh | sudo bash
+curl -s https://raw.githubusercontent.com/phygres/wordlisttools/main/install.sh | sudo bash
 ```
 
 This will install the executable to `/usr/local/bin/wltools`, making it available globally as `wltools`.
