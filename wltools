@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# wltools - WordlistTools
+# A small utility to process wordlists.
+# Usage: wltools [input-wordlist] -o [output-file] -a [list1] [list2] -l/-L -s -d
+
+set -euo pipefail
+
+show_help() {
+cat <<'EOF'
+wltools - WordlistTools
+
+Usage:
+  wltools [input-wordlist] [options]
+
+Options:
+  -o [output-file]         Optional. Path to the output file. Defaults to [input-filename].output
+  -a [file1] [file2] ...   Optional. One or more additional wordlist files to append.
+  -l                       Convert all output to lowercase.
+  -L                       Convert all output to uppercase.
+  -s                       Sort the final output alphabetically.
+  -d                       Disable cleanup (keeps duplicates, empty lines, whitespace).
+  -h                       Show this help and exit.
+
+Examples:
+  wltools words.txt -o merged.txt -a more1.txt more2.txt -l -s
+  wltools /path/to/list.txt -a another.txt
+
+EOF
+}
+
+# If no args, show help
+if [[ $# -eq 0 ]]; then
+  show_help
+  exit 0
+fi
+
+# Parse args
+INPUT_FILE=""
+OUTPUT_FILE=""
+APPEND_FILES=()
+LOWER=0
+UPPER=0
+SORT=0
+NO_CLEAN=0
+
+args=()
+while (( "$#" )); do
+  case "$1" in
+    -h)
+      show_help
+      exit 0
+      ;;
+    -o)
+      shift
+      if [[ -z "${1-}" || "${1:0:1}" == "-" ]]; then
+        echo "Error: -o requires an argument." >&2
+        exit 2
+      fi
+      OUTPUT_FILE="$1"
+      shift
+      ;;
+    -a)
+      shift
+      while [[ -n "${1-}" && "${1:0:1}" != "-" ]]; do
+        APPEND_FILES+=("$1")
+        shift || break
+      done
+      ;;
+    -l)
+      LOWER=1
+      shift
+      ;;
+    -L)
+      UPPER=1
+      shift
+      ;;
+    -s)
+      SORT=1
+      shift
+      ;;
+    -d)
+      NO_CLEAN=1
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*|--*)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      if [[ -z "$INPUT_FILE" ]]; then
+        INPUT_FILE="$1"
+      else
+        echo "Unexpected positional argument: $1" >&2
+        exit 2
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$INPUT_FILE" ]]; then
+  echo "Error: input-wordlist is required." >&2
+  show_help
+  exit 2
+fi
+
+if [[ ! -f "$INPUT_FILE" ]]; then
+  echo "Error: input file '$INPUT_FILE' does not exist or is not a regular file." >&2
+  exit 2
+fi
+
+if [[ "$LOWER" -eq 1 && "$UPPER" -eq 1 ]]; then
+  echo "Error: -l and -L cannot both be set." >&2
+  exit 2
+fi
+
+if [[ -z "$OUTPUT_FILE" ]]; then
+  input_dir=$(dirname -- "$INPUT_FILE")
+  input_base=$(basename -- "$INPUT_FILE")
+  OUTPUT_FILE="$input_dir/${input_base}.output"
+fi
+
+out_dir=$(dirname -- "$OUTPUT_FILE")
+if [[ ! -d "$out_dir" ]]; then
+  mkdir -p -- "$out_dir" || {
+    echo "Error: cannot create directory '$out_dir' for output." >&2
+    exit 2
+  }
+fi
+
+TMP_IN=$(mktemp)
+TMP_TMP=$(mktemp)
+trap 'rm -f "$TMP_IN" "$TMP_TMP"' EXIT
+
+cat -- "$INPUT_FILE" > "$TMP_IN"
+
+for f in "${APPEND_FILES[@]}"; do
+  if [[ -f "$f" ]]; then
+    cat -- "$f" >> "$TMP_IN"
+  else
+    echo "Warning: append file '$f' not found — skipping." >&2
+  fi
+done
+
+if [[ "$NO_CLEAN" -eq 0 ]]; then
+  awk 'BEGIN{RS="\r\n|\n|\r"}
+  {
+    gsub(/^[ \t\r\n]+/, "", $0)
+    gsub(/[ \t\r\n]+$/, "", $0)
+    if (length($0) > 0) {
+      if (!seen[$0]++) print $0
+    }
+  }' "$TMP_IN" > "$TMP_TMP"
+else
+  cp -- "$TMP_IN" "$TMP_TMP"
+fi
+
+if [[ "$LOWER" -eq 1 ]]; then
+  awk '{ print tolower($0) }' "$TMP_TMP" > "$TMP_IN"
+  mv "$TMP_IN" "$TMP_TMP"
+fi
+
+if [[ "$UPPER" -eq 1 ]]; then
+  awk '{ print toupper($0) }' "$TMP_TMP" > "$TMP_IN"
+  mv "$TMP_IN" "$TMP_TMP"
+fi
+
+if [[ "$SORT" -eq 1 ]]; then
+  sort -u -- "$TMP_TMP" -o "$TMP_TMP" || sort -- "$TMP_TMP" -o "$TMP_TMP"
+fi
+
+if command -v iconv >/dev/null 2>&1; then
+  if iconv -f UTF-8 -t UTF-8 "$TMP_TMP" -o "$OUTPUT_FILE" 2>/dev/null; then
+    :
+  else
+    if iconv -f ISO-8859-1 -t UTF-8 "$TMP_TMP" -o "$OUTPUT_FILE" 2>/dev/null; then
+      echo "Note: input appeared not to be UTF-8; converted from ISO-8859-1 to UTF-8." >&2
+    else
+      cp -- "$TMP_TMP" "$OUTPUT_FILE"
+      echo "Warning: could not ensure UTF-8 encoding. Raw file written." >&2
+    fi
+  fi
+else
+  cp -- "$TMP_TMP" "$OUTPUT_FILE"
+  echo "Note: 'iconv' not found; output written without encoding normalization." >&2
+fi
+
+chmod --reference="$TMP_TMP" "$OUTPUT_FILE" 2>/dev/null || true
+
+echo "Output written to: $OUTPUT_FILE"
+
+exit 0
