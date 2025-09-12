@@ -11,7 +11,7 @@ if [[ $(id -u) -ne 0 ]]; then
   exit 1
 fi
 
-RAW_URL="https://raw.githubusercontent.com/phygres/wltools/main/wltools"
+RAW_URL="https://raw.githubusercontent.com/phygres/wordlisttools/main/wltools"
 
 if command -v curl >/dev/null 2>&1; then
   curl -fsSL "$RAW_URL" -o "$TARGET" || { echo "Failed to download wltools" >&2; exit 1; }
